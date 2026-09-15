@@ -1,3 +1,9 @@
 depthai==3.3.0
 depthai-nodes==0.4.0
 python-dotenv
+opencv-contrib-python
+numpy
+st7735
+gpiod
+gpiodevice
+Pillow

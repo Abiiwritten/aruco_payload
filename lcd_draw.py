@@ -2,6 +2,10 @@ import depthai as dai
 import cv2
 import numpy as np
 import os
+import time
+
+import st7735
+from PIL import Image
 
 from depthai_nodes.node import SnapsUploader
 from depthai_nodes.node.parsing_neural_network import ParsingNeuralNetwork
@@ -12,15 +16,19 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 model = "luxonis/yolov6-nano:r2-coco-512x288"
-time_interval = 1.0  # min nr of seconds between snaps uploading
+time_interval = 10.0  # min nr of seconds between snaps uploading
+
+# --- Enviro+ LCD configuration ---
+# The Enviro+ screen is a 160x80 ST7735 SPI display, driven by the separate
+# `st7735` library (a dependency of enviroplus-python, not part of it).
+LCD_UPDATE_INTERVAL_S = 0.5  # throttle SPI writes — no need to push every frame
 
 # --- ArUco configuration ---
 ARUCO_DICT = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 ARUCO_PARAMS = cv2.aruco.DetectorParameters()
 MARKER_LENGTH_M = 0.200  # 200mm x 200mm markers
 
-
-ARUCO_RES = (1920, 1080) #may need to change resolution if output is too slow. was slow on visualation through browser but fine on terminal print
+ARUCO_RES = (1920, 1080)
 CAMERA_SOCKET = dai.CameraBoardSocket.CAM_A  # OAK-D Lite's RGB camera
 
 # Marker object points (centered at origin, Z=0), used with solvePnP.
@@ -36,15 +44,30 @@ OBJ_POINTS = np.array([
 
 class ArucoDetectorNode(dai.node.HostNode):
     """Runs ArUco detection + pose estimation on the full-res frame and
-    publishes an annotated frame as a pipeline output — no local display
-    required, so it works headless on the Pi. View it via the same
-    RemoteConnection browser UI used for the Video/Visualizations topics."""
+    publishes an annotated frame as a pipeline output for the browser
+    visualizer, and also pushes a throttled copy to the Enviro+'s onboard
+    160x80 LCD — no local monitor required either way."""
 
     def build(self, frame_output, camera_matrix, dist_coeffs):
         self.camera_matrix = camera_matrix
         self.dist_coeffs = dist_coeffs
         self.aruco_detector = cv2.aruco.ArucoDetector(ARUCO_DICT, ARUCO_PARAMS)
         self.output = self.createOutput()
+
+        # Enviro+ LCD setup (same init pattern as the library's own examples).
+        self.lcd = st7735.ST7735(
+            port=0,
+            cs=1,
+            dc="GPIO9",
+            backlight="GPIO12",
+            rotation=270,
+            spi_speed_hz=10000000,
+        )
+        self.lcd.begin()
+        self.lcd_width = self.lcd.width
+        self.lcd_height = self.lcd.height
+        self._last_lcd_update = 0.0
+
         self.link_args(frame_output)
         return self
 
@@ -52,6 +75,8 @@ class ArucoDetectorNode(dai.node.HostNode):
         frame = img_frame.getCvFrame()
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = self.aruco_detector.detectMarkers(gray)
+
+        detections = []
 
         if ids is not None:
             cv2.aruco.drawDetectedMarkers(frame, corners, ids)
@@ -68,8 +93,10 @@ class ArucoDetectorNode(dai.node.HostNode):
                     x, y, z = tvec.flatten()
                     rot_deg = np.degrees(rvec.flatten())
                     center_px = marker_corners[0].mean(axis=0)
+                    detections.append((int(marker_id), distance_m))
 
-                    #incase visualizer lags, can also be used later to send to wvis
+                    # Printed straight away, independent of the visualizer —
+                    # useful since the browser view can lag behind real time.
                     print(
                         f"[ArUco] id={marker_id} "
                         f"dist={distance_m:.3f}m "
@@ -81,7 +108,29 @@ class ArucoDetectorNode(dai.node.HostNode):
 
         out_frame = dai.ImgFrame()
         out_frame.setCvFrame(frame, dai.ImgFrame.Type.BGR888p)
-        self.output.send(out_frame)
+        try:
+            self.output.send(out_frame)
+        except Exception:
+
+            # closed out from under us — safe to just drop this last frame.
+            pass
+
+        self._update_lcd(frame)
+
+    def _update_lcd(self, frame):
+        now = time.monotonic()
+        if now - self._last_lcd_update < LCD_UPDATE_INTERVAL_S:
+            return
+        self._last_lcd_update = now
+
+        #scale down frame to lcd size and convert to RGB for PIL
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        lcd_frame = cv2.resize(rgb_frame, (self.lcd_width, self.lcd_height))
+        lcd_image = Image.fromarray(lcd_frame)
+        try:
+            self.lcd.display(lcd_image)
+        except Exception as e:
+            print(f"[LCD] failed to update display: {e}", flush=True)
 
 
 visualizer = dai.RemoteConnection(httpPort=8082)
@@ -101,6 +150,7 @@ with dai.Pipeline(device) as pipeline:
 
     input_node = pipeline.create(dai.node.Camera).build()
 
+    
     aruco_output = input_node.requestOutput(ARUCO_RES, type=dai.ImgFrame.Type.NV12)
 
     # Camera intrinsics/distortion at the ArUco tap's resolution, needed for
@@ -115,7 +165,7 @@ with dai.Pipeline(device) as pipeline:
         aruco_output, camera_matrix, dist_coeffs
     )
 
-   
+    
     nn_with_parser = pipeline.create(ParsingNeuralNetwork).build(
         input_node, nn_archive
     )
