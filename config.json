@@ -1,0 +1,146 @@
+{
+  "config_version": "1.0",
+  "model": {
+    "metadata": {
+      "name": "best-yolov5-640",
+      "path": "best.blob",
+      "precision": "float16"
+    },
+    "inputs": [
+      {
+        "name": "images",
+        "dtype": "uint8",
+        "input_type": "image",
+        "shape": [
+          1,
+          3,
+          640,
+          640
+        ],
+        "layout": "NCHW",
+        "preprocessing": {
+          "mean": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "reverse_channels": false,
+          "interleaved_to_planar": false,
+          "dai_type": "BGR888p"
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "name": "output1_yolov5",
+        "dtype": "float16",
+        "shape": [
+          1,
+          27,
+          80,
+          80
+        ],
+        "layout": "NCHW"
+      },
+      {
+        "name": "output2_yolov5",
+        "dtype": "float16",
+        "shape": [
+          1,
+          27,
+          40,
+          40
+        ],
+        "layout": "NCHW"
+      },
+      {
+        "name": "output3_yolov5",
+        "dtype": "float16",
+        "shape": [
+          1,
+          27,
+          20,
+          20
+        ],
+        "layout": "NCHW"
+      }
+    ],
+    "heads": [
+      {
+        "parser": "YOLO",
+        "metadata": {
+          "subtype": "yolov5",
+          "classes": [
+            "Base",
+            "Tip",
+            "ValveClosed",
+            "ValveOpen"
+          ],
+          "n_classes": 4,
+          "iou_threshold": 0.5,
+          "conf_threshold": 0.25,
+          "max_det": 300,
+          "anchors": [
+            [
+              [
+                9.359375,
+                10.921875
+              ],
+              [
+                16.65625,
+                15.296875
+              ],
+              [
+                42.4375,
+                41.28125
+              ]
+            ],
+            [
+              [
+                67.125,
+                65.6875
+              ],
+              [
+                108.375,
+                53.96875
+              ],
+              [
+                114.9375,
+                150.125
+              ]
+            ],
+            [
+              [
+                194.25,
+                91.0625
+              ],
+              [
+                231.375,
+                220.25
+              ],
+              [
+                406.5,
+                464.75
+              ]
+            ]
+          ],
+          "yolo_outputs": [
+            "output1_yolov5",
+            "output2_yolov5",
+            "output3_yolov5"
+          ]
+        },
+        "outputs": [
+          "output1_yolov5",
+          "output2_yolov5",
+          "output3_yolov5"
+        ]
+      }
+    ]
+  }
+}
